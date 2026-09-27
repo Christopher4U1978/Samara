@@ -1,0 +1,31 @@
+@import "tailwindcss";
+
+@layer components {
+  .markdown-body {
+    @apply leading-relaxed;
+  }
+  .markdown-body p {
+    @apply mb-4 last:mb-0;
+  }
+  .markdown-body h1, .markdown-body h2, .markdown-body h3 {
+    @apply font-medium text-white mt-6 mb-2;
+  }
+  .markdown-body strong {
+    @apply font-semibold text-white;
+  }
+  .markdown-body code {
+    @apply px-1.5 py-0.5 bg-[#131316] rounded border border-[#2d2d30] font-mono text-[0.9em] text-[#e0e0e0];
+  }
+  .markdown-body pre code {
+    @apply bg-transparent p-0 block overflow-x-auto border-none;
+  }
+  .markdown-body pre {
+    @apply p-4 bg-[#131316] rounded my-4 border border-[#2d2d30];
+  }
+  .markdown-body ul {
+    @apply list-disc list-inside mb-4;
+  }
+  .markdown-body ol {
+    @apply list-decimal list-inside mb-4;
+  }
+}

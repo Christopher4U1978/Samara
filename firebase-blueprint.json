@@ -1,0 +1,38 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "Stores user preferences and state.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "maxLength": 256 },
+        "sarcasmLevel": { "type": "number", "minimum": 0, "maximum": 10 },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["email", "sarcasmLevel", "createdAt", "updatedAt"]
+    },
+    "Message": {
+      "title": "Conversation Message",
+      "description": "Stores chat history between the user and SAMARA.",
+      "type": "object",
+      "properties": {
+        "text": { "type": "string", "maxLength": 10000 },
+        "sender": { "type": "string", "enum": ["user", "samara"] },
+        "contextFront": { "type": "string", "enum": ["samara", "physicist", "witch", "admin", "unknown"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["text", "sender", "contextFront", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profiles containing their preferences like SARCASM_LEVEL."
+    },
+    "/users/{userId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/Message" },
+      "description": "The message history for a given user."
+    }
+  }
+}

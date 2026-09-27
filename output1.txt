@@ -1,0 +1,242 @@
+=== 1. All imports ===
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll, beforeAll } from 'vitest';
+import request from 'supertest';
+import { app, startServer, __resetSecurityStateForTests, __getLiveSnapshotForTests, apiErrorHandler } from './server';
+import WebSocket from 'ws';
+import { GoogleGenAI, ThinkingLevel } from '@google/genai';
+import admin from 'firebase-admin';
+
+=== 2. Every vi.mock(...) block ===
+vi.mock('firebase-admin', () => {
+  return {
+    default: {
+      getApps: vi.fn().mockReturnValue([{}]),
+      initializeApp: vi.fn(),
+      auth: vi.fn().mockReturnValue({
+        verifyIdToken: vi.fn().mockImplementation(async (token, checkRevoked) => {
+          if (token === 'valid_token') return { uid: 'test_user_123' };
+          if (token === 'valid_token_2') return { uid: 'test_user_456' };
+          if (token === 'revoked_token' && checkRevoked) {
+            const err: any = new Error('Token revoked (secret_injected_error)');
+            err.code = 'auth/id-token-revoked';
+            throw err;
+          }
+          if (token === 'unauthorized_token') return { uid: 'unauthorized_user' };
+          if (token === 'disabled_token') { 
+            const err: any = new Error('User disabled');
+            err.code = 'auth/user-disabled';
+            throw err;
+          }
+          if (token === 'delayed_token') {
+             return { uid: 'test_user_123' };
+          }
+          throw new Error('Invalid token');
+        })
+      })
+    }
+  };
+});
+
+vi.mock('@google/genai', () => {
+  const sendMessage = vi.fn().mockResolvedValue({ text: 'mock response' });
+  const create = vi.fn().mockReturnValue({ sendMessage });
+  const generateContent = vi.fn().mockResolvedValue({
+    candidates: [{ content: { parts: [{ inlineData: { data: 'mockaudio' } }] } }]
+  });
+  const connect = vi.fn().mockImplementation((args) => { 
+    lastLiveCallbacks = args.callbacks;
+    sessionMock = { sendRealtimeInput: vi.fn(), close: vi.fn() };
+    if (args.model === 'reject_me') return Promise.reject(new Error('forced reject'));
+    return Promise.resolve(sessionMock);
+  });
+
+  return {
+    GoogleGenAI: function() { return { chats: { create }, models: { generateContent }, live: { connect } }; },
+    ThinkingLevel: { HIGH: 'high' },
+    Modality: { AUDIO: 'audio' }
+  };
+
+});
+
+=== 3. The complete Firebase Admin mock ===
+vi.mock('firebase-admin', () => {
+  return {
+    default: {
+      getApps: vi.fn().mockReturnValue([{}]),
+      initializeApp: vi.fn(),
+      auth: vi.fn().mockReturnValue({
+        verifyIdToken: vi.fn().mockImplementation(async (token, checkRevoked) => {
+          if (token === 'valid_token') return { uid: 'test_user_123' };
+          if (token === 'valid_token_2') return { uid: 'test_user_456' };
+          if (token === 'revoked_token' && checkRevoked) {
+            const err: any = new Error('Token revoked (secret_injected_error)');
+            err.code = 'auth/id-token-revoked';
+            throw err;
+          }
+          if (token === 'unauthorized_token') return { uid: 'unauthorized_user' };
+          if (token === 'disabled_token') { 
+            const err: any = new Error('User disabled');
+            err.code = 'auth/user-disabled';
+            throw err;
+          }
+          if (token === 'delayed_token') {
+             return { uid: 'test_user_123' };
+          }
+          throw new Error('Invalid token');
+        })
+      })
+    }
+  };
+});
+
+=== 4. The complete verifyIdToken mock implementation ===
+verifyIdToken: vi.fn().mockImplementation(async (token, checkRevoked) => {
+          if (token === 'valid_token') return { uid: 'test_user_123' };
+          if (token === 'valid_token_2') return { uid: 'test_user_456' };
+          if (token === 'revoked_token' && checkRevoked) {
+            const err: any = new Error('Token revoked (secret_injected_error)');
+            err.code = 'auth/id-token-revoked';
+            throw err;
+          }
+          if (token === 'unauthorized_token') return { uid: 'unauthorized_user' };
+          if (token === 'disabled_token') { 
+            const err: any = new Error('User disabled');
+            err.code = 'auth/user-disabled';
+            throw err;
+          }
+          if (token === 'delayed_token') {
+             return { uid: 'test_user_123' };
+          }
+          throw new Error('Invalid token');
+        })
+
+=== 5. The complete GoogleGenAI mock ===
+vi.mock('@google/genai', () => {
+  const sendMessage = vi.fn().mockResolvedValue({ text: 'mock response' });
+  const create = vi.fn().mockReturnValue({ sendMessage });
+  const generateContent = vi.fn().mockResolvedValue({
+    candidates: [{ content: { parts: [{ inlineData: { data: 'mockaudio' } }] } }]
+  });
+  const connect = vi.fn().mockImplementation((args) => { 
+    lastLiveCallbacks = args.callbacks;
+    sessionMock = { sendRealtimeInput: vi.fn(), close: vi.fn() };
+    if (args.model === 'reject_me') return Promise.reject(new Error('forced reject'));
+    return Promise.resolve(sessionMock);
+  });
+
+  return {
+    GoogleGenAI: function() { return { chats: { create }, models: { generateContent }, live: { connect } }; },
+    ThinkingLevel: { HIGH: 'high' },
+    Modality: { AUDIO: 'audio' }
+  };
+
+});
+
+=== 6. The complete mock for ai.models.generateContent ===
+const generateContent = vi.fn().mockResolvedValue({
+    candidates: [{ content: { parts: [{ inlineData: { data: 'mockaudio' } }] } }]
+  });
+
+=== 7. The complete mock for ai.chats.create ===
+const create = vi.fn().mockReturnValue({ sendMessage });
+
+=== 8. Outer describe(...) ===
+describe('SAMARA Security Hardening (F2-R3)', () => {
+
+=== 9. Every beforeAll(...) hook ===
+beforeAll(async () => {
+    process.env.SAMARA_ALLOWED_UIDS = 'test_user_123,test_user_456';
+    serverInstance = await startServer({ wsAuthTimeout: 2000 });
+    await new Promise<void>(resolve => {
+       serverInstance.listen(0, () => {
+         port = serverInstance.address().port;
+         resolve();
+       });
+});
+
+  });
+
+=== 10. Every beforeEach(...) hook ===
+beforeEach(() => {
+    vi.clearAllMocks();
+    __resetSecurityStateForTests();
+    aiInstance = new GoogleGenAI({ apiKey: 'test' });
+  });
+
+=== 11. Every afterEach(...) hook ===
+afterEach(async () => {
+    await vi.waitFor(() => {
+        const snap = __getLiveSnapshotForTests();
+        expect(snap.activePreAuthConnections).toBe(0);
+        expect(snap.totalActiveLiveSessions).toBe(0);
+    }, { timeout: 1000, interval: 10 });
+  });
+
+=== 12. Every afterAll(...) hook ===
+afterAll(async () => {
+    await new Promise(r => serverInstance.close(r));
+  });
+
+=== 13. Any helper that resets HTTP rate-limit state ===
+__resetSecurityStateForTests(); // (used in beforeEach)
+
+=== 14. Any helper that creates authenticated requests ===
+No explicit helper; uses request(app).post('...').set('Authorization', 'Bearer valid_token') inline.
+
+=== 15. Any exported test-reset function imported from server.ts ===
+import { app, startServer, __resetSecurityStateForTests, __getLiveSnapshotForTests, apiErrorHandler } from './server';
+
+=== 16. Location of TTS tests ===
+// --- /api/tts TESTS ---
+  it('TEST-F2R2-TTS-014 — missing Authorization returns 401; Gemini TTS is not called.', async () => {
+    const res = await request(app).post('/api/tts').send({ text: 'Hello' });
+    expect(res.status).toBe(401);
+    expect(aiInstance.models.generateContent).not.toHaveBeenCalled();
+  });
+
+  it('TEST-F2R2-TTS-015 — invalid Firebase token returns 401; Gemini TTS is not called.', async () => {
+    const res = await request(app).post('/api/tts').set('Authorization', 'Bearer invalid_token').send({ text: 'Hello' });
+    expect(res.status).toBe(401);
+    expect(aiInstance.models.generateContent).not.toHaveBeenCalled();
+  });
+
+  it('TEST-F2R2-TTS-016 — valid token with unauthorized UID returns 403; Gemini TTS is not called.', async () => {
+    const res = await request(app).post('/api/tts').set('Authorization', 'Bearer unauthorized_token').send({ text: 'Hello' });
+    expect(res.status).toBe(403);
+    expect(aiInstance.models.generateContent).not.toHaveBeenCalled();
+  });
+
+  it('TEST-F2R2-TTS-017 — valid authorized request returns 200 with mockaudio and invokes Gemini TTS.', async () => {
+    const res = await request(app).post('/api/tts').set('Authorization', 'Bearer valid_token').send({ text: 'Hello' });
+    expect(res.status).toBe(200);
+    expect(res.body.audio).toBe('mockaudio');
+    expect(aiInstance.models.generateContent).toHaveBeenCalled();
+  });
+
+  it('TEST-F2R2-TTS-018 — representative invalid TTS text and sarcasm values return 400 before Gemini.', async () => {
+    const res1 = await request(app).post('/api/tts').set('Authorization', 'Bearer valid_token').send({ text: '' });
+    expect(res1.status).toBe(400);
+
+    const res2 = await request(app).post('/api/tts').set('Authorization', 'Bearer valid_token').send({ text: 'Hello', sarcasmLevel: 11 });
+    expect(res2.status).toBe(400);
+    
+    expect(aiInstance.models.generateContent).not.toHaveBeenCalled();
+  });
+
+  it('TEST-F2R2-TTS-019 — TTS SDK failure returns only the generic service error and does not expose or log the injected secret-like message.', async () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    aiInstance.models.generateContent.mockRejectedValueOnce(new Error('secret_tts_failure'));
+    
+    try {
+      const res = await request(app).post('/api/tts').set('Authorization', 'Bearer valid_token').send({ text: 'Hello' });
+      expect(res.status).toBe(500);
+      expect(res.body.error).toBe('Speech service unavailable');
+      expect(res.body.error).not.toMatch(/secret/);
+      
+      expect(consoleSpy).toHaveBeenCalled();
+      const logArgs = consoleSpy.mock.calls[0].join(' ');
+      expect(logArgs).not.toMatch(/secret_tts_failure/);
+    } finally {
+      consoleSpy.mockRestore();
+    }
+  });

@@ -1,0 +1,84 @@
+
+=== 1. enforceRateLimit ===
+export const enforceRateLimit = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const uid = (req as any).user?.uid;
+  if (!uid) return next();
+
+  const now = Date.now();
+  let record = rateLimitCache[uid];
+
+  if (!record || now > record.resetAt) {
+    record = { count: 1, resetAt: now + 60000 };
+    rateLimitCache[uid] = record;
+    return next();
+  }
+
+  record.count++;
+  if (record.count > MAX_REQUESTS_PER_MINUTE) {
+    return res.status(429).json({ error: 'Too many requests, please try again later.' });
+  }
+
+  next();
+};
+
+=== 2. Any function that clears or resets rateLimitCache ===
+export function __resetSecurityStateForTests() {
+  if (process.env.NODE_ENV !== 'test' && !process.env.VITEST) return;
+  if (activePreAuthConnections.size > 0 || totalActiveLiveSessions > 0) {
+    throw new Error('Cannot reset security state while connections are active');
+  }
+  for (const key in rateLimitCache) delete rateLimitCache[key];
+  for (const key in activeLiveSessionsByUid) delete activeLiveSessionsByUid[key];
+  for (const key in pcmAudioQuotaByUid) delete pcmAudioQuotaByUid[key];
+}
+
+=== 3. validateTtsRequest ===
+const validateTtsRequest = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  try {
+    const keys = Object.keys(req.body);
+    const allowedKeys = ['text', 'sarcasmLevel'];
+    for (const k of keys) {
+      if (!allowedKeys.includes(k)) return res.status(400).json({ error: 'Unknown field' });
+    }
+    let { text, sarcasmLevel } = req.body;
+    if (typeof text !== 'string' || !text.trim() || text.length > 5000) {
+      return res.status(400).json({ error: 'Invalid text' });
+    }
+    if (sarcasmLevel === undefined) req.body.sarcasmLevel = 5;
+    else if (!Number.isInteger(sarcasmLevel) || sarcasmLevel < 0 || sarcasmLevel > 10) {
+      return res.status(400).json({ error: 'Invalid sarcasmLevel' });
+    }
+    req.body.text = text.trim();
+    next();
+  } catch (e) {
+    return res.status(400).json({ error: 'Validation failed' });
+  }
+};
+
+=== 4. The complete /api/tts route ===
+app.post('/api/tts', 
+  verifyFirebaseToken, 
+  enforceAuthorization, 
+  enforceRateLimit, 
+  express.json({ limit: '64kb' })
+
+=== 5. apiErrorHandler ===
+export const apiErrorHandler = (err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (res.headersSent) {
+    return next(err);
+  }
+  if (err instanceof SyntaxError && 'body' in err) {
+    return res.status(400).json({ error: 'Malformed JSON' });
+  }
+  if (err.type === 'entity.too.large') {
+    return res.status(413).json({ error: 'Payload too large' });
+  }
+  return res.status(500).json({ error: req.path.includes('/api/chat') ? 'Chat service unavailable' : (req.path.includes('/api/tts') ? 'Speech service unavailable' : 'Internal Server Error') });
+};
+
+=== 6. Every server.ts export used by server.test.ts ===
+export const app = express();
+export async function startServer(options: { wsAuthTimeout?: number } = {}) { ... }
+export function __resetSecurityStateForTests() { ... }
+export function __getLiveSnapshotForTests() { ... }
+export const apiErrorHandler = (err: any, req: express.Request, res: express.Response, next: express.NextFunction) => { ... }

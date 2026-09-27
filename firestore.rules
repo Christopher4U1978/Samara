@@ -1,0 +1,72 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Catch-all default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper Functions
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isSignedIn() { return request.auth != null && request.auth.uid != null; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+
+    // User Profile Validation
+    function isValidUser(data) {
+      return data.keys().hasAll(['email', 'sarcasmLevel', 'createdAt', 'updatedAt'])
+        && data.email is string && data.email.size() <= 256
+        && data.sarcasmLevel is int && data.sarcasmLevel >= 0 && data.sarcasmLevel <= 10
+        // allow timestamp fields. We will ensure createdAt and updatedAt are timestamps
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // User Rules
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+      allow list: if false; // Blanket lists forbidden
+      allow create: if isSignedIn() && isValidId(userId) && request.auth.uid == userId
+                    && incoming().keys().hasAll(['email', 'sarcasmLevel', 'createdAt', 'updatedAt'])
+                    && incoming().keys().size() == 4
+                    && isValidUser(incoming())
+                    && incoming().createdAt == request.time;
+      allow update: if isSignedIn() && isValidId(userId) && request.auth.uid == userId
+                    && isValidUser(incoming())
+                    && incoming().createdAt == existing().createdAt
+                    && incoming().updatedAt == request.time
+                    && incoming().diff(existing()).affectedKeys().hasOnly(['sarcasmLevel', 'updatedAt']);
+      allow delete: if false;
+      
+      // Message Rules (Subcollection)
+      match /messages/{messageId} {
+        // Validation Helper for Message
+        function isValidMessage(data) {
+          return data.keys().hasAll(['text', 'sender', 'contextFront', 'createdAt'])
+            && data.text is string && data.text.size() <= 10000
+            && data.sender in ['user', 'samara']
+            && data.contextFront in ['samara', 'physicist', 'witch', 'admin', 'unknown']
+            && data.createdAt is timestamp;
+        }
+
+        allow get: if isSignedIn() && isValidId(userId) && isValidId(messageId) && request.auth.uid == userId;
+        // The list is only for the authenticated user's own collection
+        allow list: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+        allow create: if isSignedIn() && isValidId(userId) && isValidId(messageId) && request.auth.uid == userId
+                      && exists(/databases/$(database)/documents/users/$(userId)) // Master Gate
+                      && incoming().keys().hasAll(['text', 'sender', 'contextFront', 'createdAt'])
+                      && incoming().keys().size() == 4
+                      && isValidMessage(incoming())
+                      && incoming().createdAt == request.time;
+        allow update: if false; // Messages are immutable
+        allow delete: if false;
+      }
+
+      // Memory Rules (Subcollection)
+      match /memories/{memoryId} {
+        allow read: if false;
+        allow write: if false;
+      }
+    }
+  }
+}
